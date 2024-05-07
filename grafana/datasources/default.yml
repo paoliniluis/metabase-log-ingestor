@@ -1,0 +1,25 @@
+apiVersion: 1
+
+datasources:
+  - name: Loki
+    type: loki
+    uid: loki
+    access: proxy
+    url: http://loki:3100
+  - name: metrics
+    access: proxy
+    type: grafana-postgresql-datasource
+    uid: metrics
+    url: postgres-metrics:5432
+    user: metabase
+    password: mysecretpassword
+    isDefault: true
+    jsonData: {"maxOpenConns":100,"maxIdleConns":100,"maxIdleConnsAuto":true,"connMaxLifetime":14400,"database":"metabase","sslmode":"disable","postgresVersion":1600}
+    secureJsonData: {"password":"mysecretpassword"}
+  - name: influx
+    access: proxy
+    type: influxdb
+    url: http://influx:8086
+    user: metabase
+    jsonData: {"dbName":"metabase"}
+    secureJsonData: {"password":"mysecretpassword"}

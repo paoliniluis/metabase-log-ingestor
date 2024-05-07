@@ -1,0 +1,185 @@
+services:
+  metabase:
+    image: metabase/metabase-enterprise:v1.49.8
+    container_name: metabase
+    hostname: metabase
+    volumes: 
+      - /dev/urandom:/dev/random:ro
+      - $PWD/logging_config:/metabase.db
+    ports:
+      - 3000:3000
+    environment:
+      MB_DB_TYPE: postgres
+      MB_DB_DBNAME: metabase
+      MB_DB_PORT: 5432
+      MB_DB_USER: metabase
+      MB_DB_PASS: mysecretpassword
+      MB_DB_HOST: postgres-app-db
+      JAVA_TOOL_OPTIONS: -Dlog4j.configurationFile=file:/metabase.db/log4j2.xml
+    networks: 
+      - metanet1
+    depends_on: 
+      postgres-app-db:
+        condition: service_healthy
+      loki:
+        condition: service_healthy
+    healthcheck:
+      test: curl --fail -X GET -I http://localhost:3000/api/health || exit 1
+      interval: 15s
+      timeout: 5s
+      retries: 10
+  postgres-app-db:
+    image: postgres:16.2-alpine
+    container_name: postgres-app-db
+    hostname: postgres-app-db
+    environment:
+      POSTGRES_USER: metabase
+      POSTGRES_DB: metabase
+      POSTGRES_PASSWORD: mysecretpassword
+    networks: 
+      - metanet1
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U metabase -d metabase"]
+      interval: 5s
+      timeout: 5s
+      retries: 3
+  setup:
+    build: setup/.
+    container_name: setup
+    volumes:
+      - $PWD/setup/setup.py:/app/setup.py
+    networks:
+      - metanet1
+    depends_on:
+      metabase:
+        condition: service_healthy
+    command: python /app/setup.py
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 64M
+        reservations:
+          cpus: '0.5'
+          memory: 32M
+    environment:
+      host: http://metabase
+      port: 3000
+      dbs: 3
+  postgres-metrics:
+    image: postgres:16.2-alpine
+    container_name: postgres-metrics
+    hostname: postgres-metrics
+    environment:
+      POSTGRES_USER: metabase
+      POSTGRES_DB: metabase
+      POSTGRES_PASSWORD: mysecretpassword
+    networks: 
+      - metanet1
+    ports:
+      - 5432:5432
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U metabase -d metabase"]
+      interval: 5s
+      timeout: 5s
+      retries: 3
+  grafana:
+    image: grafana/grafana-oss:10.4.1
+    container_name: grafana
+    hostname: grafana
+    ports:
+      - 3030:3000
+    networks: 
+      - metanet1
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 512M
+        reservations:
+          cpus: '1'
+          memory: 256M
+    environment:
+      GF_AUTH_ANONYMOUS_ENABLED: true
+      GF_AUTH_ANONYMOUS_ORG_ROLE: Admin
+      GF_AUTH_DISABLE_LOGIN_FORM: true
+    volumes:
+      - $PWD/grafana/datasources/:/etc/grafana/provisioning/datasources/
+      - $PWD/grafana/defaults.ini:/etc/grafana/grafana.ini
+    healthcheck:
+      test: curl --fail -X GET -I http://localhost:3000/api/health || exit 1
+      interval: 5s
+      timeout: 5s
+      retries: 3
+    depends_on:
+      metabase:
+        condition: service_healthy
+  api_bun:
+    build: .
+    container_name: api_bun
+    hostname: api_bun
+    restart: always
+    networks: 
+      - metanet1
+    environment:
+      BUN_PORT: 3000
+      LOKI_HOST: http://loki:3100/loki/api/v1/push
+      INFLUX_ENDPOINT: http://influxDB:8086
+      INFLUX_TOKEN: mysecretpassword
+      INFLUX_ORG: metabase
+      INFLUX_BUCKET: metabase
+      POSTGRES_CONN_STRING: postgresql://metabase:mysecretpassword@postgres-metrics:5432/metabase
+      CREATE_METRICS_TABLE: true
+    deploy:
+      resources:
+        limits:
+          cpus: '1'
+          memory: 64M
+        reservations:
+          cpus: '0.5'
+          memory: 32M
+    depends_on:
+      loki:
+        condition: service_healthy
+      influxDB:
+        condition: service_healthy
+      postgres-metrics:
+        condition: service_healthy
+  loki:
+    image: grafana/loki:3.0.0
+    hostname: loki
+    container_name: loki
+    networks:
+      - metanet1
+    ports:
+      - 3100:3100
+    healthcheck:
+      test: wget --quiet --tries=1 --output-document=- http://localhost:3100/ready | grep -q -w ready || exit 1
+      start_period: 20s
+      interval: 10s
+      timeout: 1s
+      retries: 12
+    volumes:
+      - $PWD/loki/local-config.yaml:/etc/loki/local-config.yaml:ro
+  influxDB:
+    image: influxdb:2-alpine
+    container_name: influx
+    hostname: influx
+    networks:
+      - metanet1
+    environment:
+      DOCKER_INFLUXDB_INIT_MODE: setup 
+      DOCKER_INFLUXDB_INIT_USERNAME: metabase 
+      DOCKER_INFLUXDB_INIT_PASSWORD: mysecretpassword 
+      DOCKER_INFLUXDB_INIT_ORG: metabase 
+      DOCKER_INFLUXDB_INIT_BUCKET: metabase 
+      DOCKER_INFLUXDB_INIT_ADMIN_TOKEN: mysecretpassword
+    healthcheck:
+      test: "curl -f http://localhost:8086/ping"
+      interval: 5s
+      timeout: 10s
+      retries: 5
+
+networks: 
+  metanet1:
+    driver: bridge
