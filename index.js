@@ -10,10 +10,10 @@ const createMetricsTable = async () => {
       ts TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
       source varchar(100),
       version varchar(50),
-      verb varchar(5),
+      verb varchar(7),
       endpoint TEXT,
       is_async BOOLEAN,
-      async_completed varchar(5),
+      async_completed varchar(8),
       code INTEGER,
       time DECIMAL(10,2),
       timeunit TEXT,
@@ -140,33 +140,39 @@ const processMetrics = async (body, values) => {
       idle_timeout: 3,
     });
 
-    await sql`INSERT INTO metrics 
-      ${sql(
-        values,
-        'source',
-        'version',
-        'verb',
-        'endpoint',
-        'is_async',
-        'async_completed',
-        'code',
-        'time',
-        'timeunit',
-        'time_in_ms',
-        'app_db_calls',
-        'app_db_conns',
-        'total_app_db_conns',
-        'jetty_threads',
-        'total_jetty_threads',
-        'jetty_idle',
-        'active_threads',
-        'queries_in_flight',
-        'queued',
-        'dw_id',
-        'dw_db_connections',
-        'dw_db_total_conns',
-        'threads_blocked'
-      )}`;
+    try {
+      await sql`INSERT INTO metrics 
+        ${sql(
+          values,
+          'source',
+          'version',
+          'verb',
+          'endpoint',
+          'is_async',
+          'async_completed',
+          'code',
+          'time',
+          'timeunit',
+          'time_in_ms',
+          'app_db_calls',
+          'app_db_conns',
+          'total_app_db_conns',
+          'jetty_threads',
+          'total_jetty_threads',
+          'jetty_idle',
+          'active_threads',
+          'queries_in_flight',
+          'queued',
+          'dw_id',
+          'dw_db_connections',
+          'dw_db_total_conns',
+          'threads_blocked'
+        )}`;
+      } catch (error) {
+        console.error(body.mesa);
+        console.error(values);
+        console.error(error);
+      }
   }
 };
 
@@ -182,7 +188,7 @@ serve({
           source: process.env['SOURCE'] || request.headers.get('host'),
         };
 
-        if (body.message.includes('GET') || body.message.includes('POST') || body.message.includes('PUT') || body.message.includes('DELETE')) {
+        if (body.message.includes('GET') && !body.message.includes('"initializing"') || body.message.includes('POST') && !body.message.includes('/api/setup') || body.message.includes('PUT') || body.message.includes('DELETE')) {
           const logline = body.message.split(' ');
           values.verb = logline[0].includes('m') ? logline[0].substring(logline[0].indexOf('m') + 1) : logline[0];
           values.endpoint = logline[1];
